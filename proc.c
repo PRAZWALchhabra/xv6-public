@@ -38,10 +38,10 @@ struct cpu*
 mycpu(void)
 {
   int apicid, i;
-  
+
   if(readeflags()&FL_IF)
     panic("mycpu called with interrupts enabled\n");
-  
+
   apicid = lapicid();
   // APIC IDs are not guaranteed to be contiguous. Maybe we should have
   // a reverse map, or reserve a register to store &cpus[i].
@@ -88,6 +88,7 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->priority = 60;     // Default priority
 
   release(&ptable.lock);
 
@@ -112,6 +113,12 @@ found:
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
 
+  // adding time fields
+  // p->stime = ticks;         // start time
+  // p->etime = 0;             // end time
+  // p->rtime = 0;             // run time
+  // p->iotime = 0;            // I/O time
+
   return p;
 }
 
@@ -124,7 +131,7 @@ userinit(void)
   extern char _binary_initcode_start[], _binary_initcode_size[];
 
   p = allocproc();
-  
+
   initproc = p;
   if((p->pgdir = setupkvm()) == 0)
     panic("userinit: out of memory?");
@@ -263,6 +270,7 @@ exit(void)
 
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
+
   sched();
   panic("zombie exit");
 }
@@ -275,7 +283,7 @@ wait(void)
   struct proc *p;
   int havekids, pid;
   struct proc *curproc = myproc();
-  
+
   acquire(&ptable.lock);
   for(;;){
     // Scan through table looking for exited children.
@@ -311,6 +319,7 @@ wait(void)
   }
 }
 
+
 //PAGEBREAK: 42
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
@@ -325,16 +334,28 @@ scheduler(void)
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
-  
   for(;;){
     // Enable interrupts on this processor.
     sti();
+
+    struct proc *highP;
+    struct proc *proc_itr;
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
+
+      highP = p;
+      // choose one with highest priority
+      for (proc_itr = ptable.proc; proc_itr < &ptable.proc[NPROC]; proc_itr++) {
+        if(proc_itr->state != RUNNABLE)
+          continue;
+        if (highP->priority > proc_itr->priority)
+          highP = proc_itr;
+      }
+      p = highP;
 
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
@@ -418,7 +439,6 @@ void
 sleep(void *chan, struct spinlock *lk)
 {
   struct proc *p = myproc();
-  
   if(p == 0)
     panic("sleep");
 
@@ -531,4 +551,44 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+int ps()
+{
+  struct proc *p;
+  // Enable interrupts on this processor.
+  sti();
+  acquire(&ptable.lock);
+  cprintf("Name \t\t PID \t\t State \t\t \t\t PriorityNumber \n");
+  for (p = ptable.proc; p < &ptable.proc[NPROC]; ++p) {
+    if ( p->state == RUNNING)
+      cprintf("%s \t\t %d  \t\t RUNNING \t\t \t\t %d\n", p->name, p->pid, p->priority);
+    else if (p->state == SLEEPING)
+      cprintf("%s \t\t %d  \t\t SLEEPING \t\t \t\t %d\n", p->name, p->pid, p->priority);
+    else if ( p->state == RUNNABLE)
+      cprintf("%s \t\t %d  \t\t RUNNABLE \t\t \t\t %d\n", p->name, p->pid, p->priority);
+  }
+  release(&ptable.lock);
+  return 1;
+}
+
+// change priority
+int set_priority(int pid, int priority)
+{
+  struct proc *p;
+  // Enable interrupts on this processor.
+  sti();
+  acquire(&ptable.lock);
+  for (p = ptable.proc; p < &ptable.proc[NPROC]; ++p)
+  {
+    if (p->pid == pid)
+    {
+      cprintf("Previous Priority \nPID %d Priority %d\n",pid,p->priority);
+      p->priority = priority;
+      cprintf("Current Priority  \nPID %d Priority %d\n",pid,p->priority);
+      break;
+    }
+  }
+  release(&ptable.lock);
+  return 1;
 }

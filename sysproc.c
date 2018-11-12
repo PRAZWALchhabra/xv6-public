@@ -26,6 +26,8 @@ sys_wait(void)
   return wait();
 }
 
+// Added sys_waitx call to load parameters and calling waitx
+
 int
 sys_kill(void)
 {
@@ -88,4 +90,20 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+int sys_ps (void)
+{
+  return ps();
+}
+
+int sys_set_priority(void)
+{
+  int pid, pr;
+  if (argint(0, &pid) < 0)
+    return -1;
+  if (argint(1, &pr) < 0)
+    return -1;
+
+  return set_priority(pid, pr);
 }
